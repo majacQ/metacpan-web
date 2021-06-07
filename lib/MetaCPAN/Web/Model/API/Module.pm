@@ -44,8 +44,7 @@ sub search_web {
     my ( $self, $query, $from, $page_size ) = @_;
     $self->request( "/search/web", undef,
         { q => $query, size => $page_size // 20, from => $from // 0 } )
-        ->then( $self->add_river(
-        sub { map @$_, @{ $_[0]{results} || [] } } ) );
+        ->then( $self->add_river( sub { @{ $_[0]{results} || [] } } ) );
 }
 
 sub first {
@@ -75,7 +74,9 @@ sub requires {
             my ($data) = @_;
 
             # api should really be returning in this form already
-            $data->{releases} ||= delete $data->{data};
+            $data->{releases} ||= delete $data->{data} || [];
+            $data->{total}    ||= 0;
+            $data->{took}     ||= 0;
             return $data;
         }
     )->then( $self->add_river );

@@ -8,22 +8,24 @@ extends 'Catalyst::Model';
 
 use List::Util qw( all max );
 use Ref::Util qw( is_hashref );
-use URI;
-use URI::Escape qw(uri_escape uri_unescape);
+use URI ();
+use URI::Escape qw( uri_escape uri_unescape );
 use URI::QueryParam;    # Add methods to URI.
 use Future;
 
 my %models = (
+    _distribution => 'API::Distribution',
     _release      => 'API::Release',
     _author       => 'API::Author',
     _contributors => 'API::Contributors',
     _changes      => 'API::Changes',
     _rating       => 'API::Rating',
     _favorite     => 'API::Favorite',
+    _permission   => 'API::Permission',
 );
 
 has [ keys %models ] => ( is => 'ro' );
-has full_details => ( is => 'ro' );
+has full_details     => ( is => 'ro' );
 
 sub ACCEPT_CONTEXT {
     my ( $class, $c, @args ) = @_;
@@ -46,6 +48,7 @@ sub find {
         $self->_wrap(
             release => $data,
             %dist_data,
+            notification => $self->_get_notifications( $data->{release} ),
             $self->_release_data(
                 $data->{release}{author},
                 $data->{release}{name}
@@ -55,8 +58,8 @@ sub find {
 }
 
 sub get {
-    my ( $self, $author, $release_name ) = @_;
-    my $release = $self->_release->get( $author, $release_name );
+    my ( $self, $author, $release_name, $module_info ) = @_;
+    my $release      = $self->_release->get( $author, $release_name );
     my %release_data = $self->_release_data( $author, $release_name );
     $release->then( sub {
         my $data = shift;
@@ -67,6 +70,8 @@ sub get {
         $self->_wrap(
             release => $data,
             %release_data,
+            notification =>
+                $self->_get_notifications( $data->{release}, $module_info ),
             $self->_dist_data( $data->{release}{distribution} ),
         );
     } )->then( $self->normalize );
@@ -88,12 +93,13 @@ sub _wrap {
 
 sub _dist_data {
     my ( $self, $dist ) = @_;
+
     return (
-        favorites    => $self->_favorite->get( undef, $dist ),
+        favorites    => $self->_favorite->by_dist($dist),
         plussers     => $self->_favorite->find_plussers($dist),
         rating       => $self->_rating->get($dist),
         versions     => $self->_release->versions($dist),
-        distribution => $self->_release->distribution($dist),
+        distribution => $self->_distribution->get($dist),
     );
 }
 
@@ -102,6 +108,7 @@ sub _release_data {
     return (
         author       => $self->_author->get($author),
         contributors => $self->_contributors->get( $author, $release ),
+        coverage     => $self->_release->coverage( $author, $release ),
         (
             $self->full_details
             ? (
@@ -122,7 +129,7 @@ sub normalize {
     my $self = shift;
     sub {
         my $data = shift;
-        my $dist = $data->{release}{release}{distribution};
+
         Future->done( {
             took => max(
                 grep defined,
@@ -130,25 +137,27 @@ sub normalize {
                 grep is_hashref($_),
                 values %$data
             ),
+            notification => $data->{notification}{notification},
+            coverage     => $data->{coverage}{coverage},
             release      => $data->{release}{release},
-            favorites    => $data->{favorites}{favorites}{$dist},
-            rating       => $data->{rating}{distributions}{$dist},
-            versions     => $data->{versions}{releases},
-            distribution => $data->{distribution},
-            author       => $data->{author},
-            contributors => $data->{contributors},
+            favorites    => $data->{favorites}{favorites},
+            rating       => $data->{rating}{rating},
+            versions     => $data->{versions}{versions},
+            distribution => $data->{distribution}{distribution},
+            author       => $data->{author}{author},
+            contributors => $data->{contributors}{contributors},
             irc          => $self->groom_irc( $data->{release}{release} ),
             issues       => $self->normalize_issues(
                 $data->{release}{release},
-                $data->{distribution}
+                $data->{distribution}{distribution}
             ),
-            %{ $data->{plussers} },
+            plussers => $data->{plussers}{plussers},
             (
                 $self->full_details
                 ? (
                     files   => $data->{files}{files},
-                    modules => $data->{modules}{files},
-                    changes => $data->{changes},
+                    modules => $data->{modules}{modules},
+                    changes => $data->{changes}{changes},
                     )
                 : ()
             ),
@@ -171,8 +180,11 @@ sub groom_irc {
             my $host = $url->authority;
             my $port;
             my $user;
-            if ( $host =~ s/:(\d+)$// ) {
-                $port = $1;
+            if ( $host =~ s/:(\+)?(\d+)$// ) {
+                $port = $2;
+                if ($1) {
+                    $ssl = 1;
+                }
             }
             if ( $host =~ s/^(.*)@// ) {
                 $user = $1;
@@ -182,22 +194,19 @@ sub groom_irc {
             my $channel
                 = $path || $url->fragment || $url->query_param('channel');
             $channel =~ s/^(?![#~!+])/#/;
-            $channel = uri_escape($channel);
 
-            if ( $host =~ /(?:^|\.)freenode\.(?:com|org|net)$/ ) {
-                $irc_info->{web}
-                    = "https://webchat.freenode.net/?randomnick=1&prompt=1&channels=${channel}";
-            }
-            else {
-                my $server = $host
-                    . (
-                      $ssl ? q{:+} . ( $port || 6697 )
-                    : $port ? ":$port"
-                    :         q{}
-                    );
-                $irc_info->{web}
-                    = "https://chat.mibbit.com/?channel=${channel}&server=${server}";
-            }
+            my $link
+                = 'irc://'
+                . $host
+                . (
+                  $ssl  ? q{:+} . ( $port || 6697 )
+                : $port ? ":$port"
+                :         q{}
+                )
+                . '/'
+                . $channel
+                . '?nick=mc-guest-?';
+            $irc_info->{web} = 'https://kiwiirc.com/nextclient/#' . $link;
         }
     }
 
@@ -268,6 +277,29 @@ sub normalize_issue_url {
     }{https://rt.cpan.org/Dist/Display.html?Name=}x;
 
     return $url;
+}
+
+sub _get_notifications {
+    my ( $self, $release, $module ) = @_;
+    return $self->_permission->get_notification_info(
+        $release->{main_module} )->then( sub {
+        my $data = shift;
+
+        # Unless we already have Notifications from Permissions, see if there
+        # are others needing to be added.
+        unless ( $data->{notification} ) {
+            if ( $release->{deprecated} ) {
+                $data->{notification} = { type => 'DEPRECATED' };
+            }
+            elsif ( $module && $module->{deprecated} ) {
+                $data->{notification} = { type => 'MODULE_DEPRECATED' };
+            }
+        }
+
+        # Return the Notifications (either Permission based, or for Deprecated
+        # status).
+        return Future->wrap($data);
+        } );
 }
 
 __PACKAGE__->meta->make_immutable;

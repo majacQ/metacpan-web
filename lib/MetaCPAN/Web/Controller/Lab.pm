@@ -33,37 +33,42 @@ sub dependencies : Local : Args(0) : Does('Sortable') {
     }
 
     $c->stash( {
-        template => 'lab/dependencies.html',
+        template => 'lab/dependencies.tx',
         module   => $module,
-        data     => $data
+        data     => $data,
     } );
 }
 
-sub dashboard : Local : Args(0) {
+sub personal_dashboard : Path('dashboard') : Args(0) {
     my ( $self, $c ) = @_;
 
-    my $user = $c->model('API::User')->get_profile( $c->token )->get;
+    if ( my $pauseid = $c->req->params->{'pauseid'} ) {
+        $c->res->redirect( $c->uri_for( '/lab/dashboard', uc $pauseid ),
+            301 );
+        $c->detach;
+    }
+
+    my $user     = $c->user;
+    my $pause_id = $user && $user->pause_id;
+
+    $c->res->header( 'Vary', 'Cookie' );
+    $c->stash( { personal => 1 } );
+    $c->go( 'dashboard', [ $pause_id || () ] );
+}
+
+sub dashboard : Local : Args(1) {
+    my ( $self, $c, $pauseid ) = @_;
 
     my $report;
-    my $pauseid = $c->req->params->{'pauseid'};
     if ($pauseid) {
-        $user = { pauseid => $pauseid };
+        $report = $c->model('API::Lab')->fetch_latest_distros( 300, $pauseid )
+            ->get;
     }
-
-    if ($user) {
-        $pauseid = $user->{pauseid};
-        if ($pauseid) {
-            $report = $c->model('API::Lab')
-                ->fetch_latest_distros( 1000, $pauseid )->get;
-        }
-    }
-
-    $report->{user} = $user;
 
     $c->stash( {
-        template => 'lab/dashboard.html',
         pauseid  => $pauseid,
         report   => $report,
+        template => 'lab/dashboard.tx',
     } );
 }
 

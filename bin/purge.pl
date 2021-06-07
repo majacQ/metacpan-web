@@ -23,6 +23,10 @@ To clear a specific URL use:
 
 =cut
 
+use File::Basename ();
+use File::Spec     ();
+use lib File::Spec->catdir( File::Basename::dirname(__FILE__),
+    File::Spec->updir, 'lib' );
 use MetaCPAN::Web;
 use Getopt::Long::Descriptive;
 
@@ -46,7 +50,7 @@ if ( $opt->all ) {
 elsif ( $opt->list ) {
     ## no critic (MutatingList)
     print grep { !/_cache_key_for_user/ }
-        map { s/\A.+:\s+\$c->add_surrogate_key\((.+?)\);\Z/$1/; $_ }
+        map    { s/\A.+:\s+\$c->add_surrogate_key\((.+?)\);\Z/$1/; $_ }
         qx{git grep add_surrogate_key lib/MetaCPAN/Web/Controller/};
 }
 else {

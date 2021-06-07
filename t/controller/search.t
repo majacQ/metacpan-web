@@ -1,9 +1,8 @@
 use strict;
 use warnings;
-use utf8;
 use Test::More;
-use MetaCPAN::Web::Test;
-use Encode qw(encode is_utf8);
+use MetaCPAN::Web::Test qw( app GET test_psgi tx );
+use Encode qw( encode is_utf8 );
 
 my %xpath = (
     search_results => 'div[contains(@class, "search-results")]',
@@ -23,7 +22,8 @@ test_psgi app, sub {
     ok( $res = $cb->( GET '/search?q=&lucky=1' ), 'GET /search?q=&lucky=1' );
     is( $res->code, 302, 'code 302' );
 
-    ok( $res = $cb->( GET '/search?q=moose">' ), 'GET /search?q=moose">' );
+    ok( $res = $cb->( GET '/search?q=nothingatall' ),
+        'GET /search?q=nothingatall' );
     is( $res->code, 200, 'code 200' );
     ok( $res->content =~ /Task::Kensho/,
         'get recommendation about Task::Kensho on No result page' );
@@ -40,8 +40,8 @@ test_psgi app, sub {
 
     my $tx = tx($res);
     $tx->like( '/html/head/title', qr/moose/, 'title includes search term' );
-    my $release = $tx->find_value(
-        qq!//$xpath{search_results}//div[1]/big[1]/strong/a/\@href!);
+    my $release
+        = $tx->find_value(qq!//$xpath{search_results}//div[1]/h3/a/\@href!);
     ok( $release, "found release $release" );
 
     {
@@ -50,7 +50,7 @@ test_psgi app, sub {
 
         # This is very fragile.
         ok(
-            $description =~ /Moose/
+            $description        =~ /Moose/
                 && $description =~ /object/i
                 && $description =~ /extension/,
             'got description for Moose'
@@ -106,7 +106,9 @@ test_psgi app, sub {
     # as of 2013-01-20 there was only one page of results
     search_and_find_module(
         $cb,
-        'ねんねこ',    # no idea what this means - rwstauner 2013-01-20
+
+        # no idea what this means - rwstauner 2013-01-20
+        "\x{306d}\x{3093}\x{306d}\x{3053}",
         'Lingua::JA::WordNet',
         'search for UTF-8 characters',
     );
@@ -125,7 +127,7 @@ sub search_and_find_module {
     my ( $cb, $query, $exp_mod, $desc ) = @_;
     $query = encode( 'UTF-8' => $query ) if is_utf8($query);
     my $res = req_200_ok( $cb, GET("/search?q=$query"), $desc );
-    my $tx = tx($res);
+    my $tx  = tx($res);
 
     # make sure there is a link tag whose content is the module name
     $tx->ok(

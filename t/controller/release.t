@@ -1,12 +1,11 @@
 use strict;
 use warnings;
 use Test::More;
-use MetaCPAN::Web::Test;
+use MetaCPAN::Web::Test qw( app GET test_psgi tx );
 
 test_psgi app, sub {
     my $cb = shift;
-    ok( my $res = $cb->( GET '/release/DOESNTEXIST' ),
-        'GET /release/DOESNTEXIST' );
+    ok( my $res = $cb->( GET '/dist/DOESNTEXIST' ), 'GET /dist/DOESNTEXIST' );
     is( $res->code, 404, 'code 404' );
 
     ok( $res = $cb->( GET '/release/AUTHORDOESNTEXIST/DOESNTEXIST' ),
@@ -17,12 +16,12 @@ test_psgi app, sub {
         'GET /release/PERLER/DOESNTEXIST' );
     is( $res->code, 404, 'code 404' );
 
-    ok( $res = $cb->( GET '/release/Moose' ), 'GET /release/Moose' );
+    ok( $res = $cb->( GET '/dist/Moose' ), 'GET /dist/Moose' );
     is( $res->code, 200, 'code 200' );
 
     my $tx = tx($res);
     $tx->like( '/html/head/title', qr/Moose/, 'title includes Moose' );
-    ok( $tx->find_value('//a[@href="/release/Moose"]'),
+    ok( $tx->find_value('//a[@href="/dist/Moose"]'),
         'contains permalink to resource' );
 
     # Moose 2.1201 has no more Examples and breaks this test,
@@ -138,6 +137,29 @@ subtest 'GH issue linking' => sub {
         'Fixed GH:1013'                           => 'issues/1013">GH:1013',
         'Fixed GH #1013'                          => 'issues/1013">GH #1013',
         'Add HTTP logger (gh-16; thanks djzort!)' => 'issues/16">gh-16',
+
+        # GitHub's name, in a surprisingly large number of variants.  #2175
+        'Fix low-level file locking (github 90)' => 'issues/90">github 90',
+        'Fix low-level file locking (Github 90)' => 'issues/90">Github 90',
+        'Fix low-level file locking (gitHub 90)' => 'issues/90">gitHub 90',
+        'Fix low-level file locking (GitHub 90)' => 'issues/90">GitHub 90',
+        'Fix github#90'                          => 'issues/90">github#90',
+        'Fix github-90'                          => 'issues/90">github-90',
+        'Fix github:90'                          => 'issues/90">github:90',
+        'Fix github #90'                         => 'issues/90">github #90',
+        'Fix Github#90'                          => 'issues/90">Github#90',
+        'Fix Github-90'                          => 'issues/90">Github-90',
+        'Fix Github:90'                          => 'issues/90">Github:90',
+        'Fix Github #90'                         => 'issues/90">Github #90',
+        'Fix gitHub#90'                          => 'issues/90">gitHub#90',
+        'Fix gitHub-90'                          => 'issues/90">gitHub-90',
+        'Fix gitHub:90'                          => 'issues/90">gitHub:90',
+        'Fix gitHub #90'                         => 'issues/90">gitHub #90',
+        'Fix GitHub#90'                          => 'issues/90">GitHub#90',
+        'Fix GitHub-90'                          => 'issues/90">GitHub-90',
+        'Fix GitHub:90'                          => 'issues/90">GitHub:90',
+        'Fix GitHub #90'                         => 'issues/90">GitHub #90',
+
         'Merged PR#1013 -- thanks' => 'issues/1013">PR#1013</a>',
         'Merged PR:1013 -- thanks' => 'issues/1013">PR:1013</a>',
         'Merged PR-1013 -- thanks' => 'issues/1013">PR-1013</a>',

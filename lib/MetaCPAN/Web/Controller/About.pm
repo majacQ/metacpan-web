@@ -8,29 +8,25 @@ sub auto : Private {
     my ( $self, $c ) = @_;
 
     $c->add_surrogate_key('ABOUT');
+    $c->add_surrogate_key('STATIC');
     $c->browser_max_age('1d');
     $c->cdn_max_age('1y');
-
 }
 
 sub about : Path : Args(0) {
     my ( $self, $c ) = @_;
-    $c->stash( template => 'about.html' );
 }
 
 sub contributors : Local : Args(0) {
     my ( $self, $c ) = @_;
-    $c->stash( template => 'about/contributors.html' );
 }
 
 sub contact : Local : Args(0) {
     my ( $self, $c ) = @_;
-    $c->stash( template => 'about/contact.html' );
 }
 
 sub meta_hack : Local : Args(0) {
     my ( $self, $c ) = @_;
-    $c->stash( template => 'about/meta_hack.html' );
 }
 
 sub resources : Local : Args(0) {
@@ -41,27 +37,22 @@ sub resources : Local : Args(0) {
 
 sub sponsors : Local : Args(0) {
     my ( $self, $c ) = @_;
-    $c->stash( template => 'about/sponsors.html' );
 }
 
 sub development : Local : Args(0) {
     my ( $self, $c ) = @_;
-    $c->stash( template => 'about/development.html' );
 }
 
 sub missing_modules : Local : Args(0) {
     my ( $self, $c ) = @_;
-    $c->stash( template => 'about/missing_modules.html' );
 }
 
 sub faq : Local : Args(0) {
     my ( $self, $c ) = @_;
-    $c->stash( template => 'about/faq.html' );
 }
 
 sub metadata : Local : Args(0) {
     my ( $self, $c ) = @_;
-    $c->stash( template => 'about/metadata.html' );
 }
 
 sub stats : Local : Args(0) {

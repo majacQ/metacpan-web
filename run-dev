@@ -1,8 +1,48 @@
 #!/bin/bash
 
+# This script is a convenient way to run metacpan-web from a local system
+# without using Docker or any VM solution.  It should be faster and more
+# convenient to debug than running plackup manually.
+#
+# It starts two web servers.  The first on port 5001 using a simple server
+# with no concurrency (to aid in debugging) to handle the dynamic requests.
+# The second on port 5000 using a "fast" server that can handle many
+# concurrent requests which will serve the static files and proxy to the
+# first server.
+
+# Rather than running plackup, you can simply run:
+#
+# ./run-dev
+#
+# or
+#
+# carton exec ./run-dev
+#
+# Then browse to http://localhost:5000/
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --suffix)
+            METACPAN_WEB_CONFIG_LOCAL_SUFFIX="$2"
+            export METACPAN_WEB_CONFIG_LOCAL_SUFFIX
+            shift
+        ;;
+        --suffix=*)
+            METACPAN_WEB_CONFIG_LOCAL_SUFFIX="${1:9}"
+            export METACPAN_WEB_CONFIG_LOCAL_SUFFIX
+        ;;
+        *)
+            echo "Unsupported option $1" >&2
+            exit 1
+        ;;
+    esac
+    shift
+done
+
 export METACPAN_WEB_PORT=5001
-export PLACK_ENV=development
 export COLUMNS="$(tput cols)"
+[ -z "$PLACK_ENV" ] && PLACK_ENV=development
+export PLACK_ENV
 
 suffix="$METACPAN_WEB_CONFIG_LOCAL_SUFFIX"
 [ -z "$suffix" ] && suffix="local"
@@ -17,8 +57,12 @@ while true; do
     sleep 1
     ( echo '' >/dev/tcp/localhost/"$METACPAN_WEB_PORT" ) 2>/dev/null && break
 done
-for fast_handler in Feersum Gazelle Starlet Starman; do
+for fast_handler in Gazelle Starlet Starman; do
     perl -mPlack::Handler::$fast_handler -e1 &>/dev/null && break
 done
+unset HTTP_PROXY
+unset http_proxy
+unset HTTPS_PROXY
+unset https_proxy
 plackup --no-default-middleware -s "$fast_handler" -o localhost -p 5000 static-app.psgi
 kill "$app_pid"

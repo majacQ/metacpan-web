@@ -2,8 +2,6 @@
 
 // Store global data in this object
 var MetaCPAN = {};
-// Collect favs we need to check after dom ready
-MetaCPAN.favs_to_check = {};
 
 // provide localStorage shim to work around https://bugzilla.mozilla.org/show_bug.cgi?id=748620
 try {
@@ -80,7 +78,7 @@ function toggleTOC() {
 }
 
 function setFavTitle(button) {
-    button.attr('title', button.hasClass('active') ? 'Remove from favorite' : 'Add to favorite');
+    button.attr('title', button.hasClass('active') ? 'Remove from favorites' : 'Add to favorites');
     return;
 }
 
@@ -90,6 +88,13 @@ $(document).ready(function() {
     processUserData();
 
     $(".ttip").tooltip();
+
+    $('.help-btn').each(function() {
+        $(this).click(function(event) {
+            $('#keyboard-shortcuts').modal();
+            event.preventDefault();
+        })
+    });
 
     // Global keyboard shortcuts
     Mousetrap.bind('?', function() {
@@ -128,13 +133,13 @@ $(document).ready(function() {
 
         var sortable = [];
         table.find('thead th').each(function(i, el) {
+            var header = {};
             if ($(el).hasClass('no-sort')) {
-                cfg.headers[i] = {
-                    sorter: false
-                };
+                header.sorter = false;
             } else {
                 sortable.push(i);
             }
+            cfg.headers[i] = header;
         });
 
         var sortid;
@@ -145,7 +150,12 @@ $(document).ready(function() {
             sortid = table.attr('data-default-sort');
         }
         if (!sortid) {
-            sortid = '0,0';
+            var match = /[?&]sort=\[\[([0-9,]+)\]\]/.exec(window.location.search);
+            if (match) {
+                sortid = decodeURIComponent(match[1]);
+            } else {
+                sortid = '0,0';
+            }
         }
         try {
             sortid = JSON.parse('[' + sortid + ']');
@@ -153,20 +163,16 @@ $(document).ready(function() {
             sortid = [0, 0];
         }
 
-        var found;
-        $(sortable).each(function(i, col) {
-            if (sortid[0] == col) {
-                found = true;
-                return false;
-            }
-        });
-        if (found) {
-            cfg.sortList = [sortid];
-        } else if (sortable.length) {
-            cfg.sortList = [
-                [sortable[0], 0]
-            ];
+        var sortCol;
+        var sortHeader = cfg.headers[sortid[0]];
+        if (typeof sortHeader === 'undefined') {
+            sortLCol = [sortable[0], 0];
+        } else if (sortHeader.sorter == false) {
+            sortCol = [sortable[0], 0];
+        } else {
+            sortCol = sortid;
         }
+        cfg.sortList = [sortCol];
 
         table.tablesorter(cfg);
     });
@@ -263,11 +269,22 @@ $(document).ready(function() {
     for (var i = 0; i < items.length; i++) {
         var element = items[i];
         var text = element.textContent;
+
+        // try to find a reasonable place to cut to allow mid-abbreviation.
+        // we want to cut "near" the middle, but prefer on a boundary.
         var cut = Math.floor(text.length / 5 * 3);
+        var start_text = text.substr(0, cut);
+        var end_text = text.substr(cut);
+        var res = start_text.match(/^(.*[- :])(.*?)$/);
+        if (res && res[1].length > text.length / 4) {
+            start_text = res[1];
+            end_text = res[2] + end_text;
+        }
+
         var start = document.createElement('span');
-        start.appendChild(document.createTextNode(text.substr(0, cut)));
+        start.appendChild(document.createTextNode(start_text));
         var end = document.createElement('span');
-        end.appendChild(document.createTextNode(text.substr(cut)));
+        end.appendChild(document.createTextNode(end_text));
         $(element).empty();
         element.appendChild(end);
         start.style.maxWidth = 'calc(100% - ' + end.clientWidth + 'px)';
@@ -372,9 +389,14 @@ $(document).ready(function() {
     set_page_size('a[href*="/recent"]', 'recent_page_size');
     set_page_size('a[href*="/requires"]', 'requires_page_size');
 
-    var changes = $('#last-changes-container');
-    if (changes.prop('scrollHeight') > changes.height()) {
-        $("#last-changes-toggle").show();
+    var changes = $('#last-changes');
+    var changes_inner = $('#last-changes-container');
+    var changes_toggle = $("#last-changes-toggle");
+    changes.addClass(['collapsable', 'collapsed']);
+    var changes_content_height = Math.round(changes_inner.prop('scrollHeight'));
+    var changes_ui_height = Math.round(changes_inner.height() + changes_toggle.height());
+    if (changes_content_height <= changes_ui_height) {
+        changes.removeClass(['collapsable', 'collapsed']);
     }
 
     var pod2html_form = $('#metacpan-pod-renderer-form');
@@ -436,7 +458,7 @@ $(document).ready(function() {
                 var reader = new FileReader();
                 reader.onload = function(e) {
                     pod2html_text.get(0).value = e.target.result;
-                    pod2html_update(pod2html_text.get(0).value);
+                    pod2html_update(e.target.result);
                 };
                 reader.readAsText(file);
             }
@@ -448,60 +470,63 @@ $(document).ready(function() {
         e.stopPropagation();
         pod2html_update();
     });
+
+    var renderer = $(".metacpan-pod-renderer")
+
+    var dragTimer;
+    renderer.on("dragover", function(event) {
+        event.preventDefault();
+        if (dragTimer) {
+            window.clearTimeout(dragTimer);
+        }
+        dragTimer = window.setTimeout(function() {
+            renderer.removeClass("dragging");
+            window.clearTimeout(dragTimer);
+            dragTimer = null;
+        }, 500);
+    });
+
+    $(document).on("dragenter", function(event) {
+        renderer.addClass("dragging");
+    });
+
+    renderer.on("drop", function(event) {
+        event.preventDefault();
+        event.stopPropagation();
+        renderer.removeClass("dragging");
+        if (dragTimer) {
+            window.clearTimeout(dragTimer);
+            dragTimer = null;
+        }
+        var reader = new FileReader();
+        reader.onload = function(e) {
+            pod2html_text.get(0).value = e.target.result;
+            pod2html_update(e.target.result);
+        };
+        reader.readAsText(event.originalEvent.dataTransfer.files[0]);
+    });
 });
 
 function set_page_size(selector, storage_name) {
-    $(selector).on('click', function() {
-        var url = $(this).attr('href');
-        var result = /size=(\d+)/.exec(url);
+    $(selector).each(function() {
+        var url = this.href;
+        var result = /[&;?]size=(\d+)(?:$|[&;])/.exec(url);
+        var size;
         if (result && result[1]) {
-            var page_size = result[1];
-            MetaCPAN.storage.setItem(storage_name, page_size);
-            return true;
-        } else {
-            page_size = MetaCPAN.storage.getItem(storage_name);
-            if (page_size) {
-                if (/\?/.exec(url)) {
-                    document.location.href = url + '&size=' + page_size;
-                } else {
-                    document.location.href = url + '?size=' + page_size;
-                }
-                return false;
-            };
-        }
-    });
-}
-
-
-function searchForNearest() {
-    $("#busy").css({
-        visibility: 'visible'
-    });
-    navigator.geolocation.getCurrentPosition(function(pos) {
-            var query = $.getUrlVar('q');
-            if (!query) {
-                query = '';
-            }
-            query = query.replace(/(^|\s+)loc:\S+|$/, '');
-            query = query + ' loc:' + pos.coords.latitude + ',' + pos.coords.longitude;
-            query = query.replace(/(^|\s)\s+/g, '$1');
-            document.location.href = '/mirrors?q=' + encodeURIComponent(query);
-        },
-        function() {
-            $("#busy").css({
-                visibility: 'hidden'
+            size = result[1];
+            $(this).click(function() {
+                MetaCPAN.storage.setItem(storage_name, size);
+                return true;
             });
-        }, {
-            maximumAge: 600000
-        });
-}
-
-function logInPAUSE(a) {
-    if (!a.href.match(/pause/))
+        } else if (size = MetaCPAN.storage.getItem(storage_name)) {
+            if (/\?/.exec(url)) {
+                this.href += '&size=' + size;
+            } else {
+                this.href += '?size=' + size;
+            }
+        }
         return true;
-    var id = prompt('Please enter your PAUSE ID:');
-    if (id) document.location.href = a.href + '&id=' + id;
-    return false;
+    });
 }
 
 function processUserData() {
@@ -530,9 +555,11 @@ function showUserData(fav_data) {
         var distribution = value.distribution;
 
         // On the page... make it deltable and styled as 'active'
-        if (MetaCPAN.favs_to_check[distribution]) {
-            $('#' + distribution + '-fav input[name="remove"]').val(1);
-            var button = $('#' + distribution + '-fav button');
+        var fav_display = $('#' + distribution + '-fav');
+
+        if (fav_display.length) {
+            fav_display.find('input[name="remove"]').val(1);
+            var button = fav_display.find('button');
             button.addClass('active');
             setFavTitle(button);
         }
@@ -544,9 +571,13 @@ function showUserData(fav_data) {
 function getFavDataFromServer() {
     $.ajax({
         type: 'GET',
-        url: '/account/favorite/list_as_json',
+        url: '/account/login_status',
         success: function(databack) {
-            showUserData(databack);
+            if (databack.logged_in) {
+                showUserData(databack);
+            } else {
+                $('.logged_out').css('display', 'inline');
+            }
         },
         error: function() {
             // Can't be logged in, should be getting 403

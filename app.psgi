@@ -12,6 +12,7 @@ use Config::ZOMG ();
 use Log::Log4perl;
 use File::Spec;
 use File::Path ();
+use File::Find ();
 use Plack::Builder;
 use Digest::SHA;
 
@@ -41,15 +42,14 @@ BEGIN {
     package MetaCPAN::Web::WarnHandler;
     Log::Log4perl->wrapper_register(__PACKAGE__);
     my $logger = Log::Log4perl->get_logger;
-    $SIG{__WARN__} = sub { $logger->warn(@_) };
-
-    $dev_mode and require Devel::Confess and Devel::Confess->import;
+    $SIG{__WARN__} = sub { $logger ? $logger->warn(@_) : warn @_ };
 }
 
 use lib "$root_dir/lib";
 use MetaCPAN::Web;
 
-my $tempdir = "$root_dir/var/tmp";
+# do not use the read only mount point when running from a docker container
+my $tempdir = is_linux_container() ? "/var/tmp" : "$root_dir/var/tmp";
 
 STDERR->autoflush;
 
@@ -61,7 +61,7 @@ builder {
         sub {
             my ($env) = @_;
             if ( $env->{HTTP_FASTLY_SSL} ) {
-                $env->{HTTPS} = 'ON';
+                $env->{HTTPS}             = 'ON';
                 $env->{'psgi.url_scheme'} = 'https';
             }
             if ( my $host = $env->{HTTP_X_FORWARDED_HOST} ) {
@@ -75,6 +75,32 @@ builder {
                 $env->{REMOTE_ADDR} = $addrs[0];
             }
             $app->($env);
+        };
+    };
+    enable sub {
+
+        # put all security-related headers here
+        my $app = shift;
+        sub {
+            my ($env) = @_;
+            Plack::Util::response_cb(
+                $app->($env),
+                sub {
+                    push @{ $_[0][1] }, 'Content-Security-Policy' => join(
+                        '; ',
+                        "default-src * data: 'unsafe-inline'",
+                        "frame-ancestors 'self' *.metacpan.org",
+
+        # temporary 'unsafe-eval' because root/static/js/jquery.tablesorter.js
+                        "script-src 'self' 'unsafe-eval' 'unsafe-inline' *.metacpan.org *.google-analytics.com *.google.com www.gstatic.com",
+
+                        ),
+                        'X-Frame-Options'        => "SAMEORIGIN",
+                        'X-XSS-Protection'       => "1; mode=block",
+                        'X-Content-Type-Options' => "nosniff",
+                        ;
+                },
+            );
         };
     };
     enable sub {
@@ -107,10 +133,15 @@ builder {
         );
     }
 
+    enable 'FixMissingBodyInRedirect';
+
+    enable '+MetaCPAN::Middleware::OldUrls';
+
     enable '+MetaCPAN::Middleware::Static' => (
         root     => $root_dir,
         dev_mode => $dev_mode,
         temp_dir => $tempdir,
+        config   => $config,
     );
 
     builder {
@@ -129,3 +160,7 @@ builder {
         MetaCPAN::Web->psgi_app;
     };
 };
+
+sub is_linux_container {
+    return -e '/proc/1/cgroup';
+}

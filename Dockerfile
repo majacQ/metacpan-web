@@ -1,23 +1,32 @@
-FROM perl:5.22
+FROM metacpan/metacpan-base:latest
 
-ENV PERL_MM_USE_DEFAULT=1 PERL_CARTON_PATH=/carton
+ARG CPM_ARGS=--with-test
 
-COPY cpanfile cpanfile.snapshot /metacpan-web/
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+RUN curl -sL https://deb.nodesource.com/setup_10.x | bash \
+    && curl -sL https://dl.yarnpkg.com/debian/pubkey.gpg | apt-key add - \
+    && echo "deb https://dl.yarnpkg.com/debian/ stable main" | tee /etc/apt/sources.list.d/yarn.list \
+    && apt-get update \
+    && apt-get install -y -f --no-install-recommends libcmark-dev nodejs yarn=1.19.2-1 \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY . /metacpan-web/
 WORKDIR /metacpan-web
 
-RUN cpanm App::cpm \
+RUN yarn install
+
+RUN cpanm --notest App::cpm \
     && cpm install -g Carton \
     && useradd -m metacpan-web -g users \
-    && mkdir /carton \
-    && cpm install -L /carton \
+    && cpm install -g ${CPM_ARGS}\
     && rm -fr /root/.cpanm /root/.perl-cpm /tmp/*
 
-RUN chown -R metacpan-web:users /metacpan-web /carton
-
-VOLUME /carton
+RUN chown -R metacpan-web:users /metacpan-web
 
 USER metacpan-web:users
 
 EXPOSE 5001
 
-CMD ["carton", "exec", "plackup", "-p", "5001", "-r"]
+CMD ["plackup", "-p", "5001", "-r"]
